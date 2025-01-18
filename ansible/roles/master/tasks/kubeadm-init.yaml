@@ -1,0 +1,42 @@
+- name: Generate Kubeadm configuration
+  ansible.builtin.template:
+    src: "kubeadm-stacked-config.j2"
+    dest: "{{ kubeadm_config_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  tags: init_kubeadm
+
+# run kubernetes init command on master node #1
+- name: Initialize Kubernetes cluster
+  ansible.builtin.command: "kubeadm init --config {{ kubeadm_config_file }} --upload-certs"
+  args:
+    creates: /opt/kubernetes/init_command
+  become: true
+  tags: init_kubeadm
+
+# create a directory for the kubeconfig file
+- name: Create kubeconfig directory
+  ansible.builtin.file:
+    path: "/opt/kubernetes/.kube"
+    state: directory
+    mode: "0755"
+  tags: kubeconfig_setup
+
+- name: Copy kubeconfig to user home directory
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "/opt/kubernetes/.kube/config"
+    remote_src: true
+    owner: "root"
+    group: "root"
+    mode: "0644"
+  tags: kubeconfig_setup
+
+
+- name: Fetch kubeconfig file
+  ansible.builtin.fetch:
+    src: /opt/kubernetes/.kube/config
+    dest: ./.kube/config
+    flat: true
+  tags: kubeconfig_setup

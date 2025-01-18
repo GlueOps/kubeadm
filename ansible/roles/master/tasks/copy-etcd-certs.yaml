@@ -1,0 +1,23 @@
+- name: Create /etc/kubernetes/pki directory
+  ansible.builtin.file:
+    path: "/etc/kubernetes/pki/etcd"
+    state: directory
+    mode: "0755"
+
+- name: Copy CA certificate
+  ansible.builtin.copy:
+    src: "etcd-openssl/ca.pem"
+    dest: "/etc/kubernetes/pki/etcd/ca.pem"
+    mode: "0600"
+
+- name: Copy etcd certificates
+  ansible.builtin.copy:
+    src: "etcd-openssl/etcd.pem"
+    dest: "/etc/kubernetes/pki/etcd/etcd.pem"
+    mode: "0600"
+
+- name: Copy etcd private key
+  ansible.builtin.copy:
+    src: "etcd-openssl/etcd-key.pem"
+    dest: "/etc/kubernetes/pki/etcd/etcd-key.pem"
+    mode: "0600"

@@ -1,0 +1,23 @@
+---
+platforms: 
+  - name: instance
+
+
+driver:
+  name: default
+
+provisioner:
+  name: ansible
+  env:
+    ANSIBLE_HOST_KEY_CHECKING: false
+  inventory:
+    links:
+      hosts: inventory/hosts.ini
+
+scenario:
+  name: default
+  test_sequence:
+    - create
+    - converge
+    - verify
+    - destroy

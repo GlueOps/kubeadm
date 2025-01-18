@@ -1,0 +1,33 @@
+---
+- name: Ensure HAProxy is Installed and Running
+  hosts: loadbalancer  # Or adjust this to the appropriate group for your nodes
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Ensure HAProxy is installed
+      ansible.builtin.package:
+        name: haproxy
+        state: present
+      register: haproxy_installed
+
+    - name: Check if HAProxy is running
+      ansible.builtin.service:
+        name: haproxy
+        state: started
+        enabled: true
+      when: haproxy_installed.changed
+      register: haproxy_service_status
+
+    - name: Assert HAProxy is installed
+      ansible.builtin.assert:
+        that:
+          - haproxy_installed is not failed
+        success_msg: "HAProxy is installed successfully."
+        fail_msg: "HAProxy installation failed."
+
+    - name: Assert HAProxy service is running
+      ansible.builtin.assert:
+        that:
+          - haproxy_service_status.state == 'started'
+        success_msg: "HAProxy service is running."
+        fail_msg: "HAProxy service is not running."

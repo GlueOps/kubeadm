@@ -1,0 +1,184 @@
+---
+- name: Create Hetzner VMs and Firewall
+  hosts: localhost
+  gather_facts: false
+  vars:
+    num_master_nodes: 1
+    num_lb_nodes: 3
+    num_worker_nodes: 1
+  tasks:
+    - name: Create Hetzner Network
+      hetzner.hcloud.network:
+        name: kubernetes-cluster
+        ip_range: "10.0.0.0/16"
+        api_token: "{{ lookup('env', 'HCLOUD_TOKEN') }}"
+      register: network
+
+    - name: Create Hetzner Network Subnet
+      hetzner.hcloud.subnetwork:
+        network: kubernetes-cluster
+        network_zone: "eu-central"
+        ip_range: "10.0.0.0/24"
+        api_token: "{{ lookup('env', 'HCLOUD_TOKEN') }}"
+        type: cloud
+      register: subnet
+
+    - name: Create Firewall
+      hetzner.hcloud.firewall:
+        name: my-firewall
+        rules:
+          - direction: in
+            protocol: tcp
+            port: "1-65535"
+            source_ips:
+              - "0.0.0.0/0"
+              - "::/0"
+          - direction: in
+            protocol: udp
+            port: "1-65535"
+            source_ips:
+              - "0.0.0.0/0"
+              - "::/0"
+        api_token: "{{ lookup('env', 'HCLOUD_TOKEN') }}"
+      register: firewall
+
+    - name: Create LoadBalancer Nodes
+      hetzner.hcloud.server:
+        name: "lb-node-{{ item + 1 }}"
+        server_type: cpx31
+        image: ubuntu-24.04
+        location: "{{ lookup('env', 'HCLOUD_LOCATION') | default('fsn1') }}"
+        enable_ipv4: true
+        enable_ipv6: false
+        firewalls:
+          - my-firewall
+        user_data: "{{ lookup('file', playbook_dir + '/cloudinit/cloud-init-lb.yaml') }}"
+        api_token: "{{ lookup('env', 'HCLOUD_TOKEN') }}"
+      loop: "{{ range(0, num_lb_nodes) | list }}"
+      register: lb_nodes
+
+    - name: Create Master Nodes
+      hetzner.hcloud.server:
+        name: "master-node-{{ item + 1 }}"
+        server_type: cpx31
+        image: ubuntu-24.04
+        location: "{{ lookup('env', 'HCLOUD_LOCATION') | default('fsn1') }}"
+        enable_ipv4: true
+        enable_ipv6: false
+        firewalls:
+          - my-firewall
+        user_data: "{{ lookup('file', playbook_dir + '/cloudinit/cloud-init-master.yaml') }}"
+        api_token: "{{ lookup('env', 'HCLOUD_TOKEN') }}"
+      loop: "{{ range(0, num_master_nodes) | list }}"
+      register: master_nodes
+
+    - name: Create LoadBalancer Nodes
+      hetzner.hcloud.server:
+        name: "worker-node-{{ item + 1 }}"
+        server_type: cpx31
+        image: ubuntu-24.04
+        location: "{{ lookup('env', 'HCLOUD_LOCATION') | default('fsn1') }}"
+        enable_ipv4: true
+        enable_ipv6: false
+        firewalls:
+          - my-firewall
+        user_data: "{{ lookup('file', playbook_dir + '/cloudinit/cloud-init-worker.yaml') }}"
+        api_token: "{{ lookup('env', 'HCLOUD_TOKEN') }}"
+      loop: "{{ range(0, num_worker_nodes) | list }}"
+      register: worker_nodes
+
+    - name: Create a server network and specify the ip address
+      hetzner.hcloud.server_network:
+        network: kubernetes-cluster
+        server: "lb-node-{{ item + 1 }}"
+        ip: "10.0.0.1{{ item + 1 }}"
+        state: present
+      loop: "{{ range(0, num_lb_nodes) | list }}"
+
+    - name: Create a server network and specify the ip address
+      hetzner.hcloud.server_network:
+        network: kubernetes-cluster
+        server: "master-node-{{ item + 1 }}"
+        ip: "10.0.0.2{{ item + 1 }}"
+        state: present
+      loop: "{{ range(0, num_master_nodes) | list }}"
+
+    - name: Create a server network and specify the ip address
+      hetzner.hcloud.server_network:
+        network: kubernetes-cluster
+        server: "worker-node-{{ item + 1 }}"
+        ip: "10.0.0.3{{ item + 1 }}"
+        state: present
+      loop: "{{ range(0, num_worker_nodes) | list }}"
+
+    - name: Pause for 1 minutes for restablishing the cluster
+      ansible.builtin.pause:
+        minutes: 1
+    - name: Add Lb Nodes to Inventory
+      ansible.builtin.add_host:
+        name: "lb-node-{{ item.item }}"
+        ansible_host: "{{ item.hcloud_server.ipv4_address }}"
+        ansible_user: "haproxyadmin"
+        ip: "{{ item.hcloud_server.private_networks_info[0].ip }}"
+        groups: loadbalancer
+        ansible_private_key_file: "keys/lb_node"
+      loop: "{{ lb_nodes.results }}"
+
+    - name: Add Master Nodes to Inventory
+      ansible.builtin.add_host:
+        name: "master-node-{{ item.item }}"
+        ansible_host: "{{ item.hcloud_server.ipv4_address }}"
+        ansible_user: "cluster"
+        ip: "{{ item.hcloud_server.private_networks_info[0].ip }}"
+        groups: masters
+        ansible_private_key_file: "keys/master_node"
+
+      loop: "{{ master_nodes.results }}"
+
+    - name: Add Worker Nodes to Inventory
+      ansible.builtin.add_host:
+        name: "worker-node-{{ item.item }}"
+        ansible_host: "{{ item.hcloud_server.ipv4_address }}"
+        ansible_user: "cluster"
+        ip: "{{ item.hcloud_server.private_networks_info[0].ip }}"
+        groups: workers
+        ansible_private_key_file: "keys/worker_node"
+
+      loop: "{{ worker_nodes.results }}"
+
+    - name: Store dynamic inventory in a file
+      ansible.builtin.copy:
+        content: |
+          {% for node in lb_nodes.results %}
+          [all.children.loadbalancer.hosts.lb-node-{{ node.item }}]
+          ansible_host={{ node.hcloud_server.ipv4_address }}
+          ip = {{ node.hcloud_server.private_networks_info[0].ip }}
+          ansible_user=haproxyadmin
+          ansible_private_key_file=keys/lb_node
+          {% endfor %}
+
+          {% for node in master_nodes.results %}
+          [all.children.masters.hosts.master-{{ node.item }}]
+          ansible_host={{ node.hcloud_server.ipv4_address }}
+          ansible_user=cluster
+          ansible_private_key_file=keys/master_node
+          {% endfor %}
+
+          {% for node in worker_nodes.results %}
+          [all.children.workers.hosts.worker-{{ node.item }}]
+          ansible_host={{ node.hcloud_server.ipv4_address }}
+          ansible_user=cluster
+          ansible_private_key_file=keys/worker_node
+          {% endfor %}
+        dest: "./inventory/hosts.ini"
+        mode: "0644"
+
+    - name: Refresh inventory to ensure new instances exist in inventory
+      ansible.builtin.meta: refresh_inventory
+
+    - name: Fail if molecule group is missing
+      ansible.builtin.assert:
+        that: "'loadbalancer' in groups"
+        fail_msg: |
+          loadbalancer group was not found inside inventory groups: {{ groups }}
+      run_once: true # noqa: run-once[task]

@@ -1,0 +1,9 @@
+---
+- name: Converge
+  hosts: loadbalancer
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Test loadbalancer
+      ansible.builtin.include_role:
+        name: loadbalancer
