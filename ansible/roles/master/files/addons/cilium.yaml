@@ -3639,7 +3639,7 @@ authentication:
           # @schema
           override: ~
           repository: "docker.io/library/busybox"
-          tag: "1.37.0@sha256:d82f458899c9696cb26a7c02d5568f81c8c8223f8661bb2a7988b269c8b9051e"
+          tag: "1.37.0@sha256:9532d8c39891ca2ecde4d30d7710e01fb739c87a8b9299685c63704296b16028"
           digest: "sha256:a5d0ce49aa801d475da48f8cb163c354ab95cab073cd3c138bd458fc8257fbf1"
           useDigest: true
           pullPolicy: "IfNotPresent"
